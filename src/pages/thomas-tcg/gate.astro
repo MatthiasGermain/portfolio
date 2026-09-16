@@ -1,0 +1,64 @@
+---
+export const prerender = false;
+
+import Base from '../../layouts/Base.astro';
+
+const expected = import.meta.env.THOMAS_TCG_CODE;
+
+/**
+ * Destination après saisie du code, limitée aux pages du jeu. Sans ce filtre,
+ * un lien `?next=https://autre-site` passerait par la vraie page du code puis
+ * emmènerait le joueur ailleurs. On résout l'URL plutôt que de tester une
+ * chaîne : ça écarte aussi `//autre-site`, `/\autre-site` ou `javascript:`,
+ * dont l'origine diffère une fois résolue.
+ */
+function safeNext(raw: string | null): string {
+  const fallback = '/thomas-tcg/host';
+  if (!raw) return fallback;
+  try {
+    const url = new URL(raw, Astro.url.origin);
+    if (url.origin !== Astro.url.origin) return fallback;
+    const inGame = url.pathname === '/thomas-tcg' || url.pathname.startsWith('/thomas-tcg/');
+    if (!inGame || url.pathname === '/thomas-tcg/gate') return fallback;
+    return url.pathname + url.search;
+  } catch {
+    return fallback;
+  }
+}
+
+const next = safeNext(Astro.url.searchParams.get('next'));
+let error: string | null = null;
+
+if (Astro.request.method === 'POST') {
+  const form = await Astro.request.formData();
+  const code = String(form.get('code') ?? '');
+  if (!expected || code === expected) {
+    Astro.cookies.set('ttcg_auth', expected ?? code, { path: '/', httpOnly: true, sameSite: 'lax' });
+    return Astro.redirect(next);
+  }
+  error = 'Code incorrect.';
+}
+---
+
+<Base lang="fr" title="Thomas TCG" description="Accès privé.">
+  <main class="min-h-screen flex items-center justify-center bg-ink px-4">
+    <form method="post" class="w-full max-w-sm bg-card border border-line rounded-xl p-6">
+      <h1 class="text-lg font-semibold mb-1">Thomas TCG</h1>
+      <p class="text-sm text-slate-400 mb-4">Entre le code pour accéder au jeu.</p>
+      {error && <p class="text-sm text-red-400 mb-3">{error}</p>}
+      <input
+        type="password"
+        name="code"
+        placeholder="Code d'accès"
+        required
+        class="w-full px-3 py-2 rounded-lg bg-surface border border-line text-slate-100 mb-4"
+      />
+      <button
+        type="submit"
+        class="w-full py-2 rounded-lg bg-accent text-ink font-semibold hover:brightness-110"
+      >
+        Entrer
+      </button>
+    </form>
+  </main>
+</Base>

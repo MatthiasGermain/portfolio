@@ -1,0 +1,53 @@
+---
+export const prerender = false;
+
+import QRCode from 'qrcode';
+import Base from '../../layouts/Base.astro';
+import { getState } from '../../lib/thomas-tcg/store';
+
+const state = await getState();
+if (!state) return Astro.redirect('/thomas-tcg/setup');
+
+const players = Object.values(state.players);
+
+const playersWithQr = await Promise.all(
+  players.map(async (p) => {
+    const url = new URL(`/thomas-tcg/player/${p.id}`, Astro.url.origin).toString();
+    const qrSvg = await QRCode.toString(url, {
+      type: 'svg',
+      margin: 1,
+      color: { dark: '#0b0f14', light: '#f0f0f5' },
+    });
+    return { ...p, url, qrSvg };
+  }),
+);
+---
+
+<Base lang="fr" title="Thomas TCG — Joueurs" description="Liens personnels des joueurs.">
+  <main class="min-h-screen bg-ink px-4 py-10">
+    <div class="max-w-lg mx-auto space-y-6">
+      <div>
+        <h1 class="text-xl font-semibold">Joueurs</h1>
+        <p class="text-sm text-slate-400">Chacun scanne son QR code ou ouvre son lien perso</p>
+      </div>
+
+      <div class="grid grid-cols-2 sm:grid-cols-3 gap-4">
+        {
+          playersWithQr.map((p) => (
+            <div class="bg-card border border-line rounded-xl p-3 text-center">
+              <div class="bg-white rounded-lg p-2 mb-2" set:html={p.qrSvg} />
+              <div class="font-semibold text-sm mb-1">{p.name}</div>
+              <a href={p.url} target="_blank" class="text-xs text-accent underline">
+                Ouvrir le lien
+              </a>
+            </div>
+          ))
+        }
+      </div>
+
+      <a href="/thomas-tcg/host" class="inline-block px-4 py-2 rounded-lg bg-accent text-ink font-semibold">
+        Retour à l'écran host
+      </a>
+    </div>
+  </main>
+</Base>

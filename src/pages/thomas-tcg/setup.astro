@@ -1,0 +1,40 @@
+---
+export const prerender = false;
+
+import Base from '../../layouts/Base.astro';
+import { THOMAS_CARDS } from '../../data/thomas-tcg-cards';
+---
+
+<Base lang="fr" title="Thomas TCG — Configuration" description="Configuration du tournoi.">
+  <main class="min-h-screen bg-ink px-4 py-10">
+    <div class="max-w-xl mx-auto">
+      <h1 class="text-xl font-semibold mb-1">Thomas TCG — Configuration du tournoi</h1>
+      <p class="text-sm text-slate-400 mb-6">{THOMAS_CARDS.length} carte(s) disponible(s) dans le pool</p>
+
+      <div class="bg-card border border-line rounded-xl p-6">
+        {
+          THOMAS_CARDS.length === 0 ? (
+            <p class="text-sm text-slate-400">Aucune carte disponible.</p>
+          ) : (
+            <form action="/api/thomas-tcg/setup.json" method="post">
+              <label class="block text-sm text-slate-400 mb-2">Noms des joueurs (un par ligne, 2 à 20)</label>
+              <textarea
+                name="names"
+                required
+                rows={10}
+                placeholder={'Thomas\nJulien\nCamille'}
+                class="w-full px-3 py-2 rounded-lg bg-surface border border-line text-slate-100 mb-4"
+              />
+              <button
+                type="submit"
+                class="w-full py-2 rounded-lg bg-accent text-ink font-semibold hover:brightness-110"
+              >
+                Générer le tournoi
+              </button>
+            </form>
+          )
+        }
+      </div>
+    </div>
+  </main>
+</Base>
