@@ -115,32 +115,32 @@ if (view.kind === 'no-tournament') {
       .duel-out { transition-duration: 0.01ms; }
     }
 
-    @keyframes ttcg-shake {
-      10%, 90% { transform: translateX(-1px); }
-      20%, 80% { transform: translateX(2px); }
-      30%, 50%, 70% { transform: translateX(-4px); }
-      40%, 60% { transform: translateX(4px); }
+    /* Tableau de score : manches gagnées, une pastille par manche. */
+    .score-num {
+      font-variant-numeric: tabular-nums;
+      display: inline-block;
     }
-    .shake { animation: ttcg-shake 0.4s; }
-
-    @keyframes ttcg-float-up {
-      0% { opacity: 0; transform: translateY(0) scale(0.8); }
-      15% { opacity: 1; transform: translateY(-6px) scale(1.15); }
-      100% { opacity: 0; transform: translateY(-38px) scale(1); }
+    @keyframes ttcg-score-pop {
+      0% { transform: scale(1); }
+      40% { transform: scale(1.6); }
+      100% { transform: scale(1); }
     }
-    .dmg-float {
-      position: absolute;
-      left: 50%;
-      top: -4px;
-      transform: translateX(-50%);
-      font-weight: 800;
-      font-size: 1.1rem;
-      color: #fb7185;
-      pointer-events: none;
-      animation: ttcg-float-up 1s ease-out forwards;
-      text-shadow: 0 1px 4px rgba(0,0,0,0.5);
+    .score-pop { animation: ttcg-score-pop 0.5s cubic-bezier(0.34, 1.56, 0.64, 1); }
+    .pip {
+      width: 1.1rem;
+      height: 1.1rem;
+      border-radius: 9999px;
+      border: 2px solid var(--color-line);
+      transition: background-color 0.3s ease, border-color 0.3s ease;
     }
-    .pv-wrap { position: relative; }
+    .pip-a { background: #38bdf8; border-color: #38bdf8; }
+    .pip-b { background: #fb7185; border-color: #fb7185; }
+    .pip-draw { background: #64748b; border-color: #64748b; }
+    .side-a { color: #38bdf8; }
+    .side-b { color: #fb7185; }
+    @media (prefers-reduced-motion: reduce) {
+      .score-pop { animation: none; }
+    }
 
     @keyframes ttcg-confetti-fall {
       0% { transform: translateY(-20px) rotate(0deg); opacity: 1; }
@@ -204,10 +204,6 @@ if (view.kind === 'no-tournament') {
       }
     }
     function sfxFlip() { beep(700, 0.09, 'triangle', 0.12); }
-    function sfxHit() {
-      beep(130, 0.2, 'sawtooth', 0.22, 0);
-      beep(70, 0.28, 'square', 0.15, 0.03);
-    }
     function sfxWin() {
       [523, 659, 784, 1046].forEach((f, i) => beep(f, 0.3, 'triangle', 0.18, i * 0.13));
     }
@@ -227,9 +223,8 @@ if (view.kind === 'no-tournament') {
       const art = src
         ? `<div class="card-art-bg" style="background-image:url('${src}')"></div><img class="card-art" src="${src}" alt="" />`
         : '';
-      // Poids de la carte dans l'issue du match : PV A − PV B vaut la somme des
-      // (charisme + drip) de A moins celle de B. C'est donc ce total qui décide
-      // quelle carte "gagne" la manche.
+      // Puissance de la carte (charisme + drip) : la plus puissante remporte la
+      // manche, même règle que `roundResult` côté serveur.
       const power = card.charisme + card.drip;
       return {
         id: flipId,
@@ -241,6 +236,7 @@ if (view.kind === 'no-tournament') {
                 ${art}
                 <div class="card-info ${src ? '' : 'no-art'}">
                   <div class="font-bold text-lg leading-tight">${escapeHtml(card.title)}</div>
+                  <div class="text-accent text-2xl font-extrabold leading-tight">Puissance ${power}</div>
                   <div class="flex justify-center gap-3 text-sm mt-1">
                     <span class="text-rose-400">${card.drip} drip</span>
                     <span class="text-emerald-400">${card.charisme} charisme</span>
@@ -253,7 +249,7 @@ if (view.kind === 'no-tournament') {
     }
 
     // Durées de la fin de manche (ms).
-    const DUEL = { damageAt: 650, spotlightAt: 1500, fadeOut: 400, grow: 500, hold: 1000 };
+    const DUEL = { scoreAt: 650, spotlightAt: 1500, fadeOut: 400, grow: 500, hold: 1000 };
     const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
     function sfxRoundWin() {
@@ -316,52 +312,153 @@ if (view.kind === 'no-tournament') {
       }, 30);
     }
 
-    function pvBar(label, current, max, index) {
-      const pct = max > 0 ? Math.max(0, Math.min(100, (current / max) * 100)) : 0;
-      const color = pct > 50 ? 'bg-emerald-400' : pct > 20 ? 'bg-amber-400' : 'bg-rose-500';
+    /** Une pastille par manche prévue, colorée selon qui l'a gagnée. */
+    function pipsHtml(rounds, targetLength) {
+      return Array.from({ length: targetLength }, (_, i) => {
+        const r = rounds[i];
+        const cls = r === 'a' ? 'pip-a' : r === 'b' ? 'pip-b' : r === 'draw' ? 'pip-draw' : '';
+        return `<span class="pip ${cls}" data-pip="${i}" title="Manche ${i + 1}"></span>`;
+      }).join('');
+    }
+
+    function scoreboardHtml(view) {
       return `
-        <div class="pv-wrap" id="pv-wrap-${index}">
-          <div class="flex justify-between text-sm mb-1">
-            <span class="font-bold">${escapeHtml(label)}</span>
-            <span data-pv>${current} / ${max} PV</span>
+        <div class="bg-card border border-line rounded-xl px-6 py-4 mt-4 flex items-center justify-between gap-4">
+          <div class="flex-1 min-w-0">
+            <div class="text-2xl font-extrabold truncate side-a">${escapeHtml(view.playerAName)}</div>
           </div>
-          <div class="h-3 rounded-full bg-surface border border-line overflow-hidden">
-            <div class="h-full ${color} transition-all duration-700 ease-out" data-bar style="width:${pct}%"></div>
+          <div class="flex flex-col items-center gap-2">
+            <div class="text-5xl font-extrabold leading-none">
+              <span class="score-num side-a" id="score-a">${view.winsA}</span>
+              <span class="text-slate-500 mx-2">–</span>
+              <span class="score-num side-b" id="score-b">${view.winsB}</span>
+            </div>
+            <div class="flex gap-2" id="pips">${pipsHtml(view.rounds, view.targetLength)}</div>
+          </div>
+          <div class="flex-1 min-w-0 text-right">
+            <div class="text-2xl font-extrabold truncate side-b">${escapeHtml(view.playerBName)}</div>
           </div>
         </div>`;
     }
 
-    function spawnDamageFloat(index, amount) {
-      const wrap = document.getElementById('pv-wrap-' + index);
-      if (!wrap || amount <= 0) return;
-      const el = document.createElement('div');
-      el.className = 'dmg-float';
-      el.textContent = '-' + amount;
-      wrap.appendChild(el);
-      wrap.classList.remove('shake');
-      void wrap.offsetWidth;
-      wrap.classList.add('shake');
-      setTimeout(() => el.remove(), 1000);
+    /** Met à jour le score après une manche, avec un petit rebond du chiffre qui bouge. */
+    function updateScore(data) {
+      const scoreA = document.getElementById('score-a');
+      const scoreB = document.getElementById('score-b');
+      if (scoreA) scoreA.textContent = data.winsA;
+      if (scoreB) scoreB.textContent = data.winsB;
+      const pip = document.querySelector(`[data-pip="${data.roundIndex}"]`);
+      if (pip) pip.classList.add(data.roundWinner === 'a' ? 'pip-a' : data.roundWinner === 'b' ? 'pip-b' : 'pip-draw');
+      const moved = data.roundWinner === 'a' ? scoreA : data.roundWinner === 'b' ? scoreB : null;
+      if (moved) {
+        moved.classList.remove('score-pop');
+        void moved.offsetWidth;
+        moved.classList.add('score-pop');
+      }
     }
 
+    /** Bracket lisible de loin : nom des tours, match en cours surligné, scores. */
     function renderBracket(bracket) {
       bracketEl.innerHTML = bracket
         .map(
-          (roundView) => `
-        <div class="flex flex-col justify-around gap-3 min-w-[160px]">
-          ${roundView
-            .map(
-              (m) => `
-            <div class="bg-surface border border-line rounded-lg px-3 py-2 text-xs">
-              <div class="${m.winner && m.winner === m.a ? 'text-accent font-bold' : ''}">${escapeHtml(m.a ?? '?')}</div>
-              <div class="${m.winner && m.winner === m.b ? 'text-accent font-bold' : ''}">${escapeHtml(m.b ?? '?')}</div>
-              ${m.isBye ? '<div class="text-slate-500 italic">bye</div>' : ''}
-            </div>`,
-            )
+          (round) => `
+        <div class="flex flex-col gap-3 min-w-[210px]">
+          <div class="text-xs uppercase tracking-wide text-slate-400 font-semibold">${escapeHtml(round.label)}</div>
+          <div class="flex flex-col justify-around gap-3 flex-1">
+          ${round.matches
+            .map((m) => {
+              const border = m.isActive ? 'border-accent ring-2 ring-accent/40' : 'border-line';
+              const line = (name) => {
+                if (m.isBye && !name) return '';
+                const won = m.winner && m.winner === name;
+                const lost = m.winner && name && m.winner !== name;
+                return `<div class="truncate ${won ? 'text-accent font-bold' : lost ? 'text-slate-500' : ''}">${escapeHtml(name ?? '…')}</div>`;
+              };
+              return `
+            <div class="bg-surface border ${border} rounded-lg px-3 py-2 text-base">
+              ${m.isActive ? '<div class="text-[10px] uppercase tracking-wide text-accent font-bold mb-1">En cours</div>' : ''}
+              ${line(m.a)}
+              ${line(m.b)}
+              ${m.isBye ? '<div class="text-xs text-slate-500 italic">exempt</div>' : ''}
+              ${m.score ? `<div class="text-xs text-slate-400 mt-1">${escapeHtml(m.score)}</div>` : ''}
+            </div>`;
+            })
             .join('')}
+          </div>
         </div>`,
         )
         .join('');
+    }
+
+    function cardThumbHtml(card) {
+      if (!card) return '';
+      const src = card.image ? encodeURI(card.image).replace(/'/g, '%27') : null;
+      return src
+        ? `<img src="${src}" alt="" class="w-full h-40 object-contain rounded-lg bg-surface mb-2" />`
+        : '';
+    }
+
+    /** Podium et faits marquants du tournoi terminé. */
+    function finishedHtml(view) {
+      const { podium, stats } = view;
+      const step = (place, names, height, medal) =>
+        names.length
+          ? `<div class="flex-1 flex flex-col items-center justify-end">
+               <div class="text-lg font-bold text-center mb-2">${names.map(escapeHtml).join('<br>')}</div>
+               <div class="w-full ${height} rounded-t-xl bg-surface border border-line flex flex-col items-center justify-start pt-3">
+                 <div class="text-3xl">${medal}</div>
+                 <div class="text-sm text-slate-400">${place}</div>
+               </div>
+             </div>`
+          : '<div class="flex-1"></div>';
+
+      const statCard = (title, body) => `
+        <div class="bg-surface border border-line rounded-xl p-4">
+          <div class="text-xs uppercase tracking-wide text-slate-400 mb-2">${title}</div>
+          ${body}
+        </div>`;
+
+      const statsHtml = [
+        stats.mostPlayedCard &&
+          statCard(
+            'Carte la plus jouée',
+            `${cardThumbHtml(stats.mostPlayedCard)}<div class="font-bold">${escapeHtml(stats.mostPlayedCard.title)}</div>
+             <div class="text-sm text-slate-400">${stats.mostPlayedCard.count} manche${stats.mostPlayedCard.count > 1 ? 's' : ''}</div>`,
+          ),
+        stats.biggestWin &&
+          statCard(
+            'Plus grosse victoire de manche',
+            `${cardThumbHtml(stats.biggestWin.winnerCard)}
+             <div class="font-bold">${escapeHtml(stats.biggestWin.winnerCard.title)}</div>
+             <div class="text-sm text-slate-400">${escapeHtml(stats.biggestWin.winnerName)} écrase « ${escapeHtml(stats.biggestWin.loserCard.title)} »
+               de ${escapeHtml(stats.biggestWin.loserName)} : ${stats.biggestWin.winnerPower} contre ${stats.biggestWin.loserPower}</div>`,
+          ),
+        stats.longestMatch &&
+          statCard(
+            'Match le plus disputé',
+            `<div class="font-bold">${escapeHtml(stats.longestMatch.aName)} vs ${escapeHtml(stats.longestMatch.bName)}</div>
+             <div class="text-sm text-slate-400">${stats.longestMatch.rounds} manches</div>`,
+          ),
+      ]
+        .filter(Boolean)
+        .join('');
+
+      return `
+        <div id="champion-box" class="bg-card border border-line rounded-xl p-8 glow-pulse">
+          <div class="flex items-center justify-between mb-6">
+            <h1 class="text-xl font-semibold">Thomas TCG — Tournoi terminé</h1>
+            <a href="/thomas-tcg/regles" class="text-sm text-accent underline">Règles</a>
+          </div>
+          <div class="flex items-end gap-4 max-w-3xl mx-auto">
+            ${step('2e', podium.second ? [podium.second] : [], 'h-28', '🥈')}
+            ${step('Champion', podium.first ? [podium.first] : [], 'h-40', '🏆')}
+            ${step('3e', podium.thirds, 'h-20', '🥉')}
+          </div>
+          ${statsHtml ? `<div class="grid gap-4 sm:grid-cols-3 mt-8">${statsHtml}</div>` : ''}
+          <div class="text-center mt-8">
+            <button id="reset-btn" class="px-4 py-2 rounded-lg bg-surface border border-line text-slate-100">Nouveau tournoi</button>
+          </div>
+        </div>`;
     }
 
     function spawnConfetti(container) {
@@ -400,12 +497,7 @@ if (view.kind === 'no-tournament') {
 
       if (view.kind === 'finished') {
         stopPolling();
-        app.innerHTML = `
-          <div id="champion-box" class="bg-card border border-line rounded-xl p-8 text-center glow-pulse">
-            <p class="text-sm text-slate-400 mb-2">🏆 Champion</p>
-            <p class="text-4xl font-extrabold text-accent mb-6">${escapeHtml(view.championName)}</p>
-            <button id="reset-btn" class="px-4 py-2 rounded-lg bg-surface border border-line text-slate-100">Nouveau tournoi</button>
-          </div>`;
+        app.innerHTML = finishedHtml(view);
         sfxWin();
         spawnConfetti(document.getElementById('champion-box'));
         document.getElementById('reset-btn')?.addEventListener('click', async () => {
@@ -426,8 +518,9 @@ if (view.kind === 'no-tournament') {
           <div>
             <h1 class="text-xl font-semibold">Thomas TCG — Sélection des cartes</h1>
             <p class="text-sm text-slate-400">
-              ${view.isTieBreak ? 'Égalité — une carte de plus chacun' : 'Chaque joueur choisit ses 3 cartes'} —
-              <a href="/thomas-tcg/players" class="text-accent underline">liens joueurs</a>
+              ${view.isTieBreak ? 'Égalité — manche décisive : une carte de plus chacun' : 'Chaque joueur choisit ses 3 cartes, dans l\'ordre des manches'} —
+              <a href="/thomas-tcg/players" class="text-accent underline">liens joueurs</a> ·
+              <a href="/thomas-tcg/regles" class="text-accent underline">règles</a>
             </p>
           </div>
           <div class="flex items-center gap-4 mt-4">
@@ -447,18 +540,21 @@ if (view.kind === 'no-tournament') {
 
       if (view.kind === 'battle') {
         stopPolling();
+        const roundNumber = Math.min(view.revealedCount + 1, view.targetLength);
         app.innerHTML = `
-          <div>
-            <h1 class="text-xl font-semibold">Thomas TCG — Combat</h1>
-            <p class="text-sm text-slate-400">Manche ${Math.min(view.revealedCount + 1, view.targetLength)} / ${view.targetLength}</p>
+          <div class="flex items-baseline justify-between gap-4">
+            <div>
+              <h1 class="text-xl font-semibold">Thomas TCG — Combat</h1>
+              <p class="text-sm text-slate-400">
+                ${view.isTieBreak ? 'Manche décisive' : `Manche ${roundNumber} sur ${view.targetLength}`} — meilleur des 3 manches
+              </p>
+            </div>
+            <a href="/thomas-tcg/regles" class="text-sm text-accent underline">Règles</a>
           </div>
-          <div class="grid grid-cols-2 gap-4 mt-4">
-            ${pvBar(view.playerAName, view.currentPvA, view.maxPvA, 0)}
-            ${pvBar(view.playerBName, view.currentPvB, view.maxPvB, 1)}
-          </div>
+          ${scoreboardHtml(view)}
           <div id="battle-stage" class="duel-stage bg-card border border-line rounded-xl p-6 mt-4 flex items-center justify-center gap-8"></div>
           <div class="mt-4">
-            <button id="battle-btn" class="w-full py-2 rounded-lg bg-accent text-ink font-semibold"></button>
+            <button id="battle-btn" class="w-full py-3 rounded-lg bg-accent text-ink font-semibold text-lg"></button>
           </div>`;
 
         const stage = document.getElementById('battle-stage');
@@ -470,10 +566,14 @@ if (view.kind === 'no-tournament') {
           triggerFlip(flip.id);
           btn.textContent = `Révéler la carte de ${view.playerBName}`;
         } else if (view.canResolve) {
-          stage.innerHTML = `<p class="text-slate-400">Toutes les cartes sont révélées.</p>`;
+          const leader = view.winsA > view.winsB ? view.playerAName : view.playerBName;
+          stage.innerHTML = view.decidedEarly
+            ? `<p class="text-2xl font-bold text-center">Match plié : ${escapeHtml(leader)} mène ${view.winsA} – ${view.winsB}<br>
+                 <span class="text-base font-normal text-slate-400">La dernière carte n'a pas besoin d'être révélée.</span></p>`
+            : `<p class="text-2xl text-slate-300 text-center">Toutes les manches sont jouées.</p>`;
           btn.textContent = 'Voir le résultat';
         } else {
-          stage.innerHTML = `<p class="text-slate-400">Prêt pour la prochaine carte.</p>`;
+          stage.innerHTML = `<p class="text-2xl text-slate-400">Prêt pour la manche ${roundNumber}.</p>`;
           btn.textContent = `Révéler la carte de ${view.playerAName}`;
         }
 
@@ -483,11 +583,14 @@ if (view.kind === 'no-tournament') {
             const data = await postJson('/api/thomas-tcg/resolve.json');
             if (data.result === 'tie') {
               sfxTie();
-              stage.innerHTML = `<p class="text-amber-400 font-semibold">Égalité de PV — une carte de plus chacun !</p>`;
-              setTimeout(poll, 1200);
+              stage.innerHTML = `<p class="text-amber-400 text-3xl font-bold text-center">Égalité !<br>
+                <span class="text-lg font-semibold">Manche décisive : chacun ajoute une carte</span></p>`;
+              setTimeout(poll, 1600);
             } else {
-              stage.innerHTML = `<p class="text-accent text-xl font-bold">Vainqueur du duel : ${escapeHtml(data.winnerName)}</p>`;
-              setTimeout(poll, 1800);
+              sfxWin();
+              stage.innerHTML = `<p class="text-accent text-4xl font-extrabold text-center">${escapeHtml(data.winnerName)}<br>
+                <span class="text-xl font-semibold text-slate-300">remporte le match ${Math.max(data.winsA, data.winsB)} – ${Math.min(data.winsA, data.winsB)}</span></p>`;
+              setTimeout(poll, 2200);
             }
             return;
           }
@@ -505,15 +608,7 @@ if (view.kind === 'no-tournament') {
             stage.innerHTML = aFlipHtml + `<div class="duel-vs text-slate-500 text-4xl font-bold">VS</div>` + flipB.html;
             triggerFlip(flipB.id);
 
-            const dmgToA = Math.max(0, view.currentPvA - data.newPvA);
-            const dmgToB = Math.max(0, view.currentPvB - data.newPvB);
-            setTimeout(() => {
-              sfxHit();
-              animatePv(data.newPvA, view.maxPvA, 0);
-              animatePv(data.newPvB, view.maxPvB, 1);
-              spawnDamageFloat(0, dmgToA);
-              spawnDamageFloat(1, dmgToB);
-            }, DUEL.damageAt);
+            setTimeout(() => updateScore(data), DUEL.scoreAt);
 
             setTimeout(() => spotlightRoundWinner(stage), DUEL.spotlightAt);
 
@@ -523,15 +618,6 @@ if (view.kind === 'no-tournament') {
         });
         return;
       }
-    }
-
-    function animatePv(to, max, index) {
-      const bar = document.querySelectorAll('[data-bar]')[index];
-      const val = document.querySelectorAll('[data-pv]')[index];
-      if (!bar || !val) return;
-      const pct = max > 0 ? Math.max(0, Math.min(100, (to / max) * 100)) : 0;
-      bar.style.width = pct + '%';
-      val.textContent = `${to} / ${max} PV`;
     }
 
     let lastSignature = '';

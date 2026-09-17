@@ -15,7 +15,10 @@ const { playerName, view } = await getPlayerView(pid);
 <Base lang="fr" title={playerName ? `Thomas TCG — ${playerName}` : 'Thomas TCG'} description="Ton tour de jeu.">
   <main class="min-h-screen bg-ink px-4 py-8">
     <div class="max-w-2xl mx-auto space-y-5">
-      <h1 class="text-xl font-semibold">{playerName ?? 'Thomas TCG'}</h1>
+      <div class="flex items-baseline justify-between gap-4">
+        <h1 class="text-xl font-semibold">{playerName ?? 'Thomas TCG'}</h1>
+        <a href="/thomas-tcg/regles" target="_blank" rel="noopener" class="text-sm text-accent underline">Règles du jeu</a>
+      </div>
       <div id="app"></div>
     </div>
   </main>
@@ -46,7 +49,9 @@ const { playerName, view } = await getPlayerView(pid);
         ${view.opponentName ? `<div class="bg-surface border border-line rounded-lg p-3 text-center text-sm">Adversaire actuel : <strong>${escapeHtml(view.opponentName)}</strong></div>` : ''}
         <div class="bg-card border border-line rounded-xl p-5 mt-3">
           <h2 class="text-xs uppercase tracking-wide text-slate-400 mb-3">
-            Choisis ${view.pickCount} carte${view.pickCount > 1 ? 's' : ''} (l'ordre compte : tu attaques dans cet ordre)
+            ${view.pickCount === 1
+              ? 'Manche décisive : choisis 1 carte'
+              : `Choisis ${view.pickCount} cartes — l'ordre compte : ta 1re carte joue la manche 1, etc.`}
           </h2>
           <div id="hand" class="grid grid-cols-2 sm:grid-cols-3 gap-3"></div>
           <button id="confirm-btn" disabled class="w-full mt-4 py-2 rounded-lg bg-accent text-ink font-semibold opacity-40">
@@ -68,6 +73,7 @@ const { playerName, view } = await getPlayerView(pid);
                 ${isSel ? `<div class="absolute top-1 right-1 w-6 h-6 rounded-full bg-accent text-ink text-xs font-bold flex items-center justify-center">${order + 1}</div>` : ''}
                 ${img}
                 <div class="text-xs font-bold mb-1">${escapeHtml(c.title)}</div>
+                <div class="text-center text-sm font-extrabold text-accent mb-1">Puissance ${c.charisme + c.drip}</div>
                 <div class="flex gap-1">
                   <span class="flex-1 text-center text-[10px] rounded bg-rose-500/10 text-rose-400 py-1">${c.drip} drip</span>
                   <span class="flex-1 text-center text-[10px] rounded bg-emerald-500/10 text-emerald-400 py-1">${c.charisme} charisme</span>

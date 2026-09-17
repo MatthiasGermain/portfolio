@@ -17,9 +17,13 @@ const GATE_PATH = '/thomas-tcg/gate';
  */
 const PLAYER_PAGE_PREFIX = '/thomas-tcg/player/';
 const PLAYER_API_PATHS = ['/api/thomas-tcg/player-state.json', '/api/thomas-tcg/select.json'];
+/** Pages sans donnée de tournoi, lisibles par tous (les joueurs y accèdent depuis leur page). */
+const PUBLIC_PAGES = ['/thomas-tcg/regles'];
 
 function isPlayerRoute(pathname: string): boolean {
-  return pathname.startsWith(PLAYER_PAGE_PREFIX) || PLAYER_API_PATHS.includes(pathname);
+  return (
+    pathname.startsWith(PLAYER_PAGE_PREFIX) || PLAYER_API_PATHS.includes(pathname) || PUBLIC_PAGES.includes(pathname)
+  );
 }
 
 /** Vrai pour `prefix` lui-même et tout ce qui est en dessous, mais pas `/thomas-tcgX`. */

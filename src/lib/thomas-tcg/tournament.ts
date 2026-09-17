@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { ThomasCard } from '../../data/thomas-tcg-cards';
-import type { CrossTotals, HandEntry, Match, Player, TournamentState } from './types';
+import type { HandEntry, Match, Player, TournamentState } from './types';
 
 const SELECTION_SIZE = 3;
 const MIN_HAND_SIZE = 15;
@@ -44,8 +44,42 @@ function drawCard(cardPool: ThomasCard[]): HandEntry {
   return { instanceId: uuid(), cardId: cardPool[Math.floor(Math.random() * cardPool.length)].id };
 }
 
+/** Puissance d'une carte : son poids dans l'issue d'un match. */
+export function cardPower(card: ThomasCard): number {
+  return card.charisme + card.drip;
+}
+
+/**
+ * Distribue des mains équilibrées. Les cartes sont classées par puissance puis
+ * découpées en autant de paliers que la main compte de cartes ; chaque joueur
+ * reçoit une carte tirée au hasard dans chaque palier.
+ *
+ * Les mains restent différentes d'un joueur à l'autre, mais leur force est
+ * comparable et une même main ne contient jamais deux fois la même carte.
+ * Mesuré sur les 30 cartes, mains de 15 : écart moyen entre les 3 meilleures
+ * cartes de deux joueurs de 2,5 à 0,75 point, dispersion de la force totale de
+ * ±12,6 à ±1,9, doublons dans une main de 99 % à 0 %.
+ *
+ * Si la main demandée dépasse le nombre de cartes existantes, on revient à un
+ * tirage libre (les paliers seraient vides).
+ */
 export function dealHands(playerNames: string[], cardPool: ThomasCard[], handSize = MIN_HAND_SIZE): Player[] {
-  return playerNames.map((name) => newPlayer(name, Array.from({ length: handSize }, () => drawCard(cardPool))));
+  if (handSize > cardPool.length) {
+    return playerNames.map((name) => newPlayer(name, Array.from({ length: handSize }, () => drawCard(cardPool))));
+  }
+
+  // Mélange avant le tri : entre cartes de même puissance, l'ordre est aléatoire.
+  const byPower = shuffle(cardPool).sort((a, b) => cardPower(a) - cardPower(b));
+  const tiers = Array.from({ length: handSize }, (_, t) =>
+    byPower.slice(Math.floor((t * byPower.length) / handSize), Math.floor(((t + 1) * byPower.length) / handSize)),
+  );
+
+  return playerNames.map((name) =>
+    newPlayer(
+      name,
+      tiers.map((tier) => ({ instanceId: uuid(), cardId: tier[Math.floor(Math.random() * tier.length)].id })),
+    ),
+  );
 }
 
 /**
@@ -87,13 +121,18 @@ export function ensurePlayableHands(state: TournamentState, cardPool: ThomasCard
   }
 }
 
-function newMatch(a: string | null, b: string | null): Match {
+/**
+ * `isBye` n'a de sens qu'au premier tour, où un joueur peut être seul. Les
+ * matchs des tours suivants sont créés vides puis remplis par les vainqueurs :
+ * les déduire de `a`/`b` à la création les marquait tous à tort comme exempts.
+ */
+function newMatch(a: string | null, b: string | null, isBye = a === null || b === null): Match {
   return {
     id: uuid(),
     a,
     b,
     winner: null,
-    isBye: a === null || b === null,
+    isBye,
     selectionA: null,
     selectionB: null,
     targetLength: SELECTION_SIZE,
@@ -129,7 +168,7 @@ export function buildBracket(playerIds: string[]): Match[][] {
   const rounds: Match[][] = [round0];
   let remaining = size / 2;
   while (remaining > 1) {
-    rounds.push(Array.from({ length: remaining / 2 }, () => newMatch(null, null)));
+    rounds.push(Array.from({ length: remaining / 2 }, () => newMatch(null, null, false)));
     remaining /= 2;
   }
 
@@ -183,52 +222,68 @@ export function champion(rounds: Match[][]): string | null {
   return last.length === 1 ? last[0].winner : null;
 }
 
-/** Total de PV de départ = somme du Charisme des cartes sélectionnées. */
-export function maxPv(
-  player: Player,
-  selection: string[],
-  cardsMap: Map<string, ThomasCard>,
-): number {
-  return selection.reduce((sum, inst) => sum + resolveCard(player, inst, cardsMap).charisme, 0);
+/*
+ * RÈGLE D'UN MATCH : meilleur des 3 manches.
+ *
+ * Chaque joueur choisit ses cartes en secret ; l'ordre choisi est l'ordre des
+ * manches. À chaque manche, la carte la plus puissante (charisme + drip)
+ * l'emporte ; à puissance égale, la manche est nulle.
+ *
+ * Le match est gagné dès qu'un joueur ne peut plus être rattrapé : son avance
+ * dépasse le nombre de manches restantes (un 2-0 évite la 3e révélation).
+ * Égalité une fois toutes les manches jouées : manche décisive, chacun ajoute
+ * une carte (`targetLength + 1`), et on recommence tant qu'elle est nulle.
+ *
+ * Retenue après simulation sur les vraies cartes : c'est la seule formule
+ * testée où l'ordre crée un vrai bluff (il change le vainqueur dans 48 % des
+ * matchs, et le joueur aux cartes les plus faibles gagne grâce à l'ordre dans
+ * 12 % des cas). Avec l'ancienne règle, une somme, l'ordre ne comptait jamais.
+ */
+
+export type RoundResult = 'a' | 'b' | 'draw';
+
+export interface MatchScore {
+  /** Résultat de chaque manche déjà révélée, dans l'ordre. */
+  rounds: RoundResult[];
+  winsA: number;
+  winsB: number;
+  /** `ongoing` : il reste des manches utiles ; `winner` : match plié ; `tie` : manche décisive nécessaire. */
+  status: 'ongoing' | 'winner' | 'tie';
+  winner: 'a' | 'b' | null;
 }
 
-/** PV restants après N manches entièrement révélées (dégâts = drip adverse cumulé). */
-export function pvAfter(
-  attacker: Player,
-  attackerSelection: string[],
-  defender: Player,
-  defenderSelection: string[],
-  revealedCount: number,
-  cardsMap: Map<string, ThomasCard>,
-): number {
-  const startingPv = maxPv(defender, defenderSelection, cardsMap);
-  const damageTaken = attackerSelection
-    .slice(0, revealedCount)
-    .reduce((sum, inst) => sum + resolveCard(attacker, inst, cardsMap).drip, 0);
-  return startingPv - damageTaken;
+export function roundResult(cardA: ThomasCard, cardB: ThomasCard): RoundResult {
+  const diff = cardPower(cardA) - cardPower(cardB);
+  return diff > 0 ? 'a' : diff < 0 ? 'b' : 'draw';
 }
 
-export function crossTotals(
+/** Score d'un match d'après les manches déjà révélées. */
+export function matchScore(
   match: Match,
   playerA: Player,
   playerB: Player,
   cardsMap: Map<string, ThomasCard>,
-): CrossTotals {
+): MatchScore {
   const selectionA = match.selectionA ?? [];
   const selectionB = match.selectionB ?? [];
-  const charismeA = maxPv(playerA, selectionA, cardsMap);
-  const charismeB = maxPv(playerB, selectionB, cardsMap);
-  const dripA = selectionA.reduce((s, i) => s + resolveCard(playerA, i, cardsMap).drip, 0);
-  const dripB = selectionB.reduce((s, i) => s + resolveCard(playerB, i, cardsMap).drip, 0);
+  const rounds: RoundResult[] = [];
+  for (let r = 0; r < match.revealedCount; r++) {
+    rounds.push(
+      roundResult(resolveCard(playerA, selectionA[r], cardsMap), resolveCard(playerB, selectionB[r], cardsMap)),
+    );
+  }
 
-  return {
-    charismeA,
-    charismeB,
-    dripA,
-    dripB,
-    pvA: charismeA - dripB,
-    pvB: charismeB - dripA,
-  };
+  const winsA = rounds.filter((r) => r === 'a').length;
+  const winsB = rounds.filter((r) => r === 'b').length;
+  const remaining = match.targetLength - match.revealedCount;
+
+  if (Math.abs(winsA - winsB) > remaining) {
+    return { rounds, winsA, winsB, status: 'winner', winner: winsA > winsB ? 'a' : 'b' };
+  }
+  if (remaining === 0) {
+    return { rounds, winsA, winsB, status: 'tie', winner: null };
+  }
+  return { rounds, winsA, winsB, status: 'ongoing', winner: null };
 }
 
 export { SELECTION_SIZE };

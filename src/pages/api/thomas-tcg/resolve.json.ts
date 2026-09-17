@@ -17,17 +17,19 @@ export const POST: APIRoute = async () => {
   }
 
   const { match, roundIdx, matchIdx } = active;
-  if (match.revealedCount < match.targetLength || match.revealSub !== 0) {
-    return new Response(JSON.stringify({ error: 'not-ready' }), { status: 400 });
-  }
-
   const cmap = new Map(THOMAS_CARDS.map((c) => [c.id, c]));
   const playerA = state.players[match.a as string];
   const playerB = state.players[match.b as string];
-  const totals = tournament.crossTotals(match, playerA, playerB, cmap);
+  const score = tournament.matchScore(match, playerA, playerB, cmap);
 
-  if (totals.pvA !== totals.pvB) {
-    const winner = totals.pvA > totals.pvB ? (match.a as string) : (match.b as string);
+  // Résolution possible seulement quand le match est plié ou à égalité, et
+  // jamais au milieu d'une manche (carte de A montrée, pas encore celle de B).
+  if (score.status === 'ongoing' || match.revealSub !== 0) {
+    return new Response(JSON.stringify({ error: 'not-ready' }), { status: 400 });
+  }
+
+  if (score.status === 'winner') {
+    const winner = score.winner === 'a' ? (match.a as string) : (match.b as string);
     match.winner = winner;
     tournament.advanceWinner(state.rounds, roundIdx, matchIdx, winner);
     tournament.resolveByes(state.rounds);
@@ -35,7 +37,7 @@ export const POST: APIRoute = async () => {
     tournament.ensurePlayableHands(state, THOMAS_CARDS);
     await saveState(state);
     return new Response(
-      JSON.stringify({ result: 'winner', winnerName: state.players[winner].name, pvA: totals.pvA, pvB: totals.pvB }),
+      JSON.stringify({ result: 'winner', winnerName: state.players[winner].name, winsA: score.winsA, winsB: score.winsB }),
       { headers: { 'Content-Type': 'application/json' } },
     );
   }

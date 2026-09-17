@@ -1,0 +1,140 @@
+---
+export const prerender = false;
+
+import Base from '../../layouts/Base.astro';
+import { THOMAS_CARDS, type ThomasCard } from '../../data/thomas-tcg-cards';
+import { SELECTION_SIZE, cardPower, handSizeFor, roundResult } from '../../lib/thomas-tcg/tournament';
+
+// L'exemple est calculé avec les vraies cartes et le vrai moteur de règles :
+// il reste juste même si les valeurs des cartes changent.
+const byTitle = (title: string) => THOMAS_CARDS.find((c) => c.title === title);
+const aliceTitles = ['Eclair de génie', 'La Calva', 'La Cuenta'];
+const bobTitles = ['Dégradé agressif', 'Tête de ?', 'Fait péter le bouteille gamin'];
+const alice = aliceTitles.map(byTitle);
+const bob = bobTitles.map(byTitle);
+const example =
+  alice.every(Boolean) && bob.every(Boolean)
+    ? (alice as ThomasCard[]).map((a, i) => {
+        const b = (bob as ThomasCard[])[i];
+        return { a, b, result: roundResult(a, b) };
+      })
+    : null;
+const aliceWins = example?.filter((r) => r.result === 'a').length ?? 0;
+const bobWins = example?.filter((r) => r.result === 'b').length ?? 0;
+
+const smallHand = handSizeFor(2);
+const bigHand = handSizeFor(20);
+---
+
+<Base lang="fr" title="Thomas TCG — Règles" description="Les règles du jeu Thomas TCG.">
+  <main class="min-h-screen bg-ink px-4 py-10">
+    <article class="max-w-2xl mx-auto space-y-6 text-slate-200 leading-relaxed">
+      <header>
+        <h1 class="text-3xl font-extrabold">Règles de Thomas TCG</h1>
+        <p class="text-slate-400 mt-2">Un tournoi à élimination directe, des duels au meilleur des 3 manches.</p>
+      </header>
+
+      <section class="bg-card border border-line rounded-xl p-6 space-y-3">
+        <h2 class="text-xl font-bold">Les cartes</h2>
+        <p>
+          Chaque carte a deux valeurs, le <span class="text-rose-400 font-semibold">drip</span> et le
+          <span class="text-emerald-400 font-semibold">charisme</span>. Leur somme donne sa
+          <span class="text-accent font-semibold">puissance</span>, affichée sur la carte : c'est la seule chose
+          qui compte en duel.
+        </p>
+        <p>
+          En début de tournoi, chacun reçoit une main de {smallHand} cartes ({bigHand} à partir de 17 joueurs).
+          Les mains sont différentes mais <strong>équilibrées</strong> : personne ne part avec un jeu bien plus
+          fort que les autres, et une main ne contient jamais deux fois la même carte.
+        </p>
+      </section>
+
+      <section class="bg-card border border-line rounded-xl p-6 space-y-3">
+        <h2 class="text-xl font-bold">Un match</h2>
+        <ol class="list-decimal pl-5 space-y-2">
+          <li>
+            Chaque joueur choisit <strong>{SELECTION_SIZE} cartes en secret</strong> sur son téléphone.
+            <strong>L'ordre compte</strong> : ta 1re carte joue la manche 1, la 2e la manche 2, etc.
+          </li>
+          <li>
+            Sur l'écran principal, les cartes sont révélées manche par manche. La carte la plus
+            <strong>puissante</strong> gagne la manche. À puissance égale, la manche est nulle.
+          </li>
+          <li>
+            Le premier à <strong>ne plus pouvoir être rattrapé</strong> gagne le match. Avec un 2 – 0, la
+            dernière carte n'est même pas révélée.
+          </li>
+          <li>
+            <strong>Égalité</strong> après toutes les manches (par exemple 1 – 1 avec une nulle) : manche
+            décisive, chacun ajoute une carte. On recommence tant qu'elle est nulle.
+          </li>
+        </ol>
+      </section>
+
+      {
+        example && (
+          <section class="bg-card border border-line rounded-xl p-6 space-y-4">
+            <h2 class="text-xl font-bold">Exemple</h2>
+            <div class="overflow-x-auto">
+              <table class="w-full text-sm">
+                <thead class="text-slate-400 text-left">
+                  <tr>
+                    <th class="py-2 pr-3">Manche</th>
+                    <th class="py-2 pr-3">Alice</th>
+                    <th class="py-2 pr-3">Bob</th>
+                    <th class="py-2">Gagnant</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {example.map((r, i) => (
+                    <tr class="border-t border-line">
+                      <td class="py-2 pr-3">{i + 1}</td>
+                      <td class={`py-2 pr-3 ${r.result === 'a' ? 'text-accent font-semibold' : ''}`}>
+                        {r.a.title} ({cardPower(r.a)})
+                      </td>
+                      <td class={`py-2 pr-3 ${r.result === 'b' ? 'text-accent font-semibold' : ''}`}>
+                        {r.b.title} ({cardPower(r.b)})
+                      </td>
+                      <td class="py-2">{r.result === 'a' ? 'Alice' : r.result === 'b' ? 'Bob' : 'Nulle'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <p>
+              {aliceWins > bobWins ? 'Alice' : bobWins > aliceWins ? 'Bob' : 'Personne ne'} gagne {Math.max(aliceWins, bobWins)} – {Math.min(aliceWins, bobWins)}.
+              {bobWins > aliceWins &&
+                " Alice a joué sa meilleure carte en dernier, mais Bob avait gardé plus fort pour la même manche : c'est l'ordre qui a fait la différence."}
+            </p>
+          </section>
+        )
+      }
+
+      <section class="bg-card border border-line rounded-xl p-6 space-y-3">
+        <h2 class="text-xl font-bold">Le tournoi</h2>
+        <ul class="list-disc pl-5 space-y-2">
+          <li>
+            <strong>Les cartes jouées sont perdues</strong> pour le reste du tournoi. Garder quelques cartes
+            fortes pour les derniers tours peut valoir le coup.
+          </li>
+          <li>Le tableau est tiré au sort. Si le nombre de joueurs l'impose, certains passent directement au tour suivant.</li>
+          <li>Un match perdu, et c'est l'élimination.</li>
+          <li>
+            Si après plusieurs égalités un joueur n'a plus assez de cartes, il en pioche automatiquement ce qui lui manque.
+          </li>
+        </ul>
+      </section>
+
+      <section class="bg-card border border-line rounded-xl p-6 space-y-3">
+        <h2 class="text-xl font-bold">Astuces</h2>
+        <ul class="list-disc pl-5 space-y-2">
+          <li>
+            <strong>Bluffe sur l'ordre.</strong> Ton adversaire ne voit pas ton choix : sacrifier une carte faible
+            contre sa carte la plus forte peut te faire gagner les deux autres manches.
+          </li>
+          <li>Il suffit de 2 manches : inutile de gaspiller tes 3 meilleures cartes dans le même match.</li>
+        </ul>
+      </section>
+    </article>
+  </main>
+</Base>
