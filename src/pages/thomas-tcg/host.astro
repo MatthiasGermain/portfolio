@@ -52,11 +52,68 @@ if (view.kind === 'no-tournament') {
       transform: rotateY(180deg);
       background: var(--color-surface);
       border: 1px solid var(--color-line);
+    }
+
+    /* Taille des cartes : grandes, mais bornées par la hauteur de l'écran pour
+       que la carte gagnante agrandie tienne sans défiler. */
+    :root {
+      --card-w: clamp(200px, min(26vw, calc((100vh - 380px) * 0.75)), 380px);
+      --winner-w: clamp(260px, min(40vw, calc((100vh - 300px) * 0.75)), 520px);
+    }
+    .card-lg { width: var(--card-w); }
+    .card-winner { width: var(--winner-w); }
+    .duel-stage { min-height: calc(var(--winner-w) * 4 / 3 + 3rem); }
+
+    /* Les images ont des formats très variés (de 0,35 à 2,2) : on les montre
+       entières (`contain`) sur un fond flouté tiré de la même image, plutôt
+       que de les rogner. Titre et stats en bandeau par-dessus. */
+    .card-art-bg {
+      position: absolute;
+      inset: -24px;
+      background-size: cover;
+      background-position: center;
+      filter: blur(20px) brightness(0.5);
+    }
+    .card-art {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+    }
+    .card-info {
+      position: absolute;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      padding: 1.25rem 0.75rem 0.7rem;
+      text-align: center;
+      background: linear-gradient(to top, rgba(5, 7, 9, 0.92), rgba(5, 7, 9, 0.6) 65%, transparent);
+    }
+    .card-info.no-art {
+      top: 0;
       display: flex;
       flex-direction: column;
+      justify-content: center;
+      background: none;
     }
-    .flip-front img { width: 100%; flex: 1 1 auto; min-height: 0; object-fit: cover; display: block; }
-    .flip-front .flip-info { flex: 0 0 auto; }
+
+    /* Fin de manche : la perdante s'efface, la gagnante passe au centre en grand. */
+    .duel-out {
+      opacity: 0;
+      transform: scale(0.85);
+      transition: opacity 0.4s ease, transform 0.4s ease;
+    }
+    .winner-glow {
+      box-shadow: 0 0 0 3px rgba(255, 209, 102, 0.9), 0 0 48px rgba(255, 209, 102, 0.55);
+      transition: box-shadow 0.4s ease;
+    }
+    .duel-tie .flip-front {
+      box-shadow: 0 0 0 2px rgba(148, 163, 184, 0.8);
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .duel-out { transition-duration: 0.01ms; }
+    }
 
     @keyframes ttcg-shake {
       10%, 90% { transform: translateX(-1px); }
@@ -106,7 +163,7 @@ if (view.kind === 'no-tournament') {
   </style>
 
   <main class="min-h-screen bg-ink px-4 py-10">
-    <div class="max-w-3xl mx-auto space-y-6">
+    <div class="max-w-6xl mx-auto space-y-6">
       <div id="app"></div>
 
       <div class="bg-card border border-line rounded-xl p-6 overflow-x-auto">
@@ -166,18 +223,25 @@ if (view.kind === 'no-tournament') {
     let flipCounter = 0;
     function flipCardHtml(card, sizeClass) {
       const flipId = 'flip-' + ++flipCounter;
-      const img = card.image ? `<img src="${card.image}" />` : '';
+      const src = card.image ? encodeURI(card.image).replace(/'/g, '%27') : null;
+      const art = src
+        ? `<div class="card-art-bg" style="background-image:url('${src}')"></div><img class="card-art" src="${src}" alt="" />`
+        : '';
+      // Poids de la carte dans l'issue du match : PV A − PV B vaut la somme des
+      // (charisme + drip) de A moins celle de B. C'est donc ce total qui décide
+      // quelle carte "gagne" la manche.
+      const power = card.charisme + card.drip;
       return {
         id: flipId,
         html: `
-          <div class="${sizeClass} flip-outer">
+          <div class="${sizeClass} flip-outer" data-power="${power}">
             <div class="flip-inner" id="${flipId}">
               <div class="flip-face flip-back"><span>?</span></div>
               <div class="flip-face flip-front">
-                ${img}
-                <div class="flip-info p-2 text-center">
-                  <div class="font-bold text-sm">${escapeHtml(card.title)}</div>
-                  <div class="flex justify-center gap-2 text-xs mt-1">
+                ${art}
+                <div class="card-info ${src ? '' : 'no-art'}">
+                  <div class="font-bold text-lg leading-tight">${escapeHtml(card.title)}</div>
+                  <div class="flex justify-center gap-3 text-sm mt-1">
                     <span class="text-rose-400">${card.drip} drip</span>
                     <span class="text-emerald-400">${card.charisme} charisme</span>
                   </div>
@@ -186,6 +250,61 @@ if (view.kind === 'no-tournament') {
             </div>
           </div>`,
       };
+    }
+
+    // Durées de la fin de manche (ms).
+    const DUEL = { damageAt: 650, spotlightAt: 1500, fadeOut: 400, grow: 500, hold: 1000 };
+    const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+    function sfxRoundWin() {
+      beep(660, 0.14, 'triangle', 0.14, 0);
+      beep(990, 0.22, 'triangle', 0.14, 0.12);
+    }
+
+    /**
+     * Met en avant la carte gagnante de la manche : la perdante et le "VS"
+     * s'effacent, puis la gagnante glisse au centre en grandissant (technique
+     * FLIP : on mesure sa position avant et après le changement de mise en
+     * page, puis on anime l'écart pour que le déplacement soit continu).
+     */
+    function spotlightRoundWinner(stage) {
+      const cards = stage.querySelectorAll('.flip-outer');
+      if (cards.length !== 2) return;
+      const [a, b] = cards;
+      const powerA = Number(a.dataset.power);
+      const powerB = Number(b.dataset.power);
+      const vs = stage.querySelector('.duel-vs');
+
+      if (powerA === powerB) {
+        if (vs) vs.textContent = 'Égalité';
+        stage.classList.add('duel-tie');
+        return;
+      }
+
+      const winner = powerA > powerB ? a : b;
+      const loser = powerA > powerB ? b : a;
+      loser.classList.add('duel-out');
+      vs?.classList.add('duel-out');
+
+      setTimeout(() => {
+        const first = winner.getBoundingClientRect();
+        loser.style.display = 'none';
+        if (vs) vs.style.display = 'none';
+        winner.classList.remove('card-lg');
+        winner.classList.add('card-winner');
+        const last = winner.getBoundingClientRect();
+
+        winner.querySelector('.flip-front')?.classList.add('winner-glow');
+        sfxRoundWin();
+        if (reducedMotion || !last.width) return;
+
+        winner.style.transformOrigin = 'top left';
+        winner.style.transition = 'none';
+        winner.style.transform = `translate(${first.left - last.left}px, ${first.top - last.top}px) scale(${first.width / last.width})`;
+        void winner.offsetWidth;
+        winner.style.transition = `transform ${DUEL.grow}ms cubic-bezier(0.22, 1, 0.36, 1)`;
+        winner.style.transform = '';
+      }, DUEL.fadeOut);
     }
     function triggerFlip(flipId) {
       setTimeout(() => {
@@ -337,7 +456,7 @@ if (view.kind === 'no-tournament') {
             ${pvBar(view.playerAName, view.currentPvA, view.maxPvA, 0)}
             ${pvBar(view.playerBName, view.currentPvB, view.maxPvB, 1)}
           </div>
-          <div id="battle-stage" class="bg-card border border-line rounded-xl p-6 mt-4 min-h-[220px] flex items-center justify-center gap-6"></div>
+          <div id="battle-stage" class="duel-stage bg-card border border-line rounded-xl p-6 mt-4 flex items-center justify-center gap-8"></div>
           <div class="mt-4">
             <button id="battle-btn" class="w-full py-2 rounded-lg bg-accent text-ink font-semibold"></button>
           </div>`;
@@ -346,8 +465,8 @@ if (view.kind === 'no-tournament') {
         const btn = document.getElementById('battle-btn');
 
         if (view.revealSub === 1 && view.revealedACard) {
-          const flip = flipCardHtml(view.revealedACard, 'w-40');
-          stage.innerHTML = flip.html + `<div class="text-slate-500 text-2xl">VS ?</div>`;
+          const flip = flipCardHtml(view.revealedACard, 'card-lg');
+          stage.innerHTML = flip.html + `<div class="duel-vs text-slate-500 text-4xl font-bold">VS ?</div>`;
           triggerFlip(flip.id);
           btn.textContent = `Révéler la carte de ${view.playerBName}`;
         } else if (view.canResolve) {
@@ -375,15 +494,15 @@ if (view.kind === 'no-tournament') {
 
           const data = await postJson('/api/thomas-tcg/reveal-next.json');
           if (data.step === 'reveal-a') {
-            const flip = flipCardHtml(data.card, 'w-40');
-            stage.innerHTML = flip.html + `<div class="text-slate-500 text-2xl">VS ?</div>`;
+            const flip = flipCardHtml(data.card, 'card-lg');
+            stage.innerHTML = flip.html + `<div class="duel-vs text-slate-500 text-4xl font-bold">VS ?</div>`;
             triggerFlip(flip.id);
             btn.textContent = `Révéler la carte de ${view.playerBName}`;
             btn.disabled = false;
           } else if (data.step === 'reveal-b') {
             const aFlipHtml = stage.querySelector('.flip-outer')?.outerHTML ?? '';
-            const flipB = flipCardHtml(data.card, 'w-40');
-            stage.innerHTML = aFlipHtml + `<div class="text-slate-500 text-2xl">VS</div>` + flipB.html;
+            const flipB = flipCardHtml(data.card, 'card-lg');
+            stage.innerHTML = aFlipHtml + `<div class="duel-vs text-slate-500 text-4xl font-bold">VS</div>` + flipB.html;
             triggerFlip(flipB.id);
 
             const dmgToA = Math.max(0, view.currentPvA - data.newPvA);
@@ -394,9 +513,12 @@ if (view.kind === 'no-tournament') {
               animatePv(data.newPvB, view.maxPvB, 1);
               spawnDamageFloat(0, dmgToA);
               spawnDamageFloat(1, dmgToB);
-            }, 600);
+            }, DUEL.damageAt);
 
-            setTimeout(() => poll(), 1700);
+            setTimeout(() => spotlightRoundWinner(stage), DUEL.spotlightAt);
+
+            // Manche suivante une fois la gagnante restée affichée `hold` ms.
+            setTimeout(() => poll(), DUEL.spotlightAt + DUEL.fadeOut + DUEL.grow + DUEL.hold);
           }
         });
         return;
