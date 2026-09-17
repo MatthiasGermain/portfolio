@@ -44,7 +44,9 @@ if (Astro.request.method === 'POST') {
   <main class="min-h-screen flex items-center justify-center bg-ink px-4">
     <form method="post" class="w-full max-w-sm bg-card border border-line rounded-xl p-6">
       <h1 class="text-lg font-semibold mb-1">Thomas TCG</h1>
-      <p class="text-sm text-slate-400 mb-4">Entre le code pour accéder au jeu.</p>
+      <p class="text-sm text-slate-400 mb-4">
+        Accès hôte. Les joueurs n'ont pas besoin de code : ils rejoignent avec leur QR code.
+      </p>
       {error && <p class="text-sm text-red-400 mb-3">{error}</p>}
       <input
         type="password"

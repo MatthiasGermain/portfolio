@@ -6,6 +6,22 @@ const PAGE_PREFIX = '/thomas-tcg';
 const API_PREFIX = '/api/thomas-tcg';
 const GATE_PATH = '/thomas-tcg/gate';
 
+/*
+ * Le code d'accès est réservé à l'hôte : configuration, écran host, liste des
+ * QR codes, reset, révélations. Les joueurs, eux, n'ont pas de code : leur
+ * lien personnel contient un identifiant aléatoire (UUID) impossible à
+ * deviner, qui les autorise sur leur seule page et leurs deux appels. Chaque
+ * route vérifie que cet identifiant appartient au tournoi en cours.
+ * `/thomas-tcg/player/` avec la barre finale n'inclut pas `/thomas-tcg/players`
+ * (la liste des QR codes, qui expose les liens de tous : réservée à l'hôte).
+ */
+const PLAYER_PAGE_PREFIX = '/thomas-tcg/player/';
+const PLAYER_API_PATHS = ['/api/thomas-tcg/player-state.json', '/api/thomas-tcg/select.json'];
+
+function isPlayerRoute(pathname: string): boolean {
+  return pathname.startsWith(PLAYER_PAGE_PREFIX) || PLAYER_API_PATHS.includes(pathname);
+}
+
 /** Vrai pour `prefix` lui-même et tout ce qui est en dessous, mais pas `/thomas-tcgX`. */
 function isUnder(pathname: string, prefix: string): boolean {
   return pathname === prefix || pathname.startsWith(`${prefix}/`);
@@ -23,8 +39,9 @@ export const onRequest = defineMiddleware(async (context, next) => {
     return next();
   }
 
-  // La page de saisie du code reste accessible (elle traite aussi son POST).
-  if (pathname === GATE_PATH) {
+  // La page de saisie du code reste accessible (elle traite aussi son POST),
+  // ainsi que les routes joueur, autorisées par leur identifiant.
+  if (pathname === GATE_PATH || isPlayerRoute(pathname)) {
     return next();
   }
 

@@ -7,19 +7,15 @@ import { getPlayerView } from '../../../lib/thomas-tcg/view';
 const { id } = Astro.params;
 const pid = id ?? '';
 const { playerName, view } = await getPlayerView(pid);
-
-if (view.kind === 'no-tournament') {
-  return Astro.redirect('/thomas-tcg/setup');
-}
-if (view.kind === 'not-found') {
-  return new Response('Joueur introuvable', { status: 404 });
-}
+// Pas de redirection vers la configuration quand il n'y a pas (ou plus) de
+// tournoi : c'est l'hôte seul qui en crée un. Le joueur voit un écran
+// d'attente, géré côté client comme les autres états.
 ---
 
-<Base lang="fr" title={`Thomas TCG — ${playerName}`} description="Ton tour de jeu.">
+<Base lang="fr" title={playerName ? `Thomas TCG — ${playerName}` : 'Thomas TCG'} description="Ton tour de jeu.">
   <main class="min-h-screen bg-ink px-4 py-8">
     <div class="max-w-2xl mx-auto space-y-5">
-      <h1 class="text-xl font-semibold">{playerName}</h1>
+      <h1 class="text-xl font-semibold">{playerName ?? 'Thomas TCG'}</h1>
       <div id="app"></div>
     </div>
   </main>
@@ -116,11 +112,38 @@ if (view.kind === 'not-found') {
       if (view.kind === 'finished') {
         stopPolling();
         app.innerHTML = view.isChampion
-          ? `<div class="bg-card border border-line rounded-xl p-8 text-center"><p class="text-3xl font-extrabold text-accent">🏆 Tu es le champion !</p></div>`
+          ? `<div class="bg-card border border-line rounded-xl p-8 text-center">
+               <p class="text-3xl font-extrabold text-accent">🏆 Tu es le champion !</p>
+               <p class="text-sm text-slate-400 mt-4">Tournoi terminé. Pour rejouer, l'hôte lance un nouveau tournoi et te donne un nouveau QR code.</p>
+             </div>`
           : `<div class="bg-card border border-line rounded-xl p-8 text-center">
                <p class="text-sm text-slate-400 mb-2">Tournoi terminé</p>
                <p class="text-lg">Champion : <strong>${escapeHtml(view.championName)}</strong></p>
+               <p class="text-sm text-slate-400 mt-4">Pour rejouer, l'hôte lance un nouveau tournoi et te donne un nouveau QR code.</p>
              </div>`;
+        return;
+      }
+
+      // Plus de tournoi (l'hôte l'a réinitialisé) : on attend, sans jamais
+      // proposer d'en créer un. On continue d'interroger pour basculer sur le
+      // message suivant si un nouveau tournoi démarre.
+      if (view.kind === 'no-tournament') {
+        app.innerHTML = `<div class="bg-card border border-line rounded-xl p-8 text-center">
+            <p class="text-lg font-semibold mb-2">Pas de tournoi en cours</p>
+            <p class="text-sm text-slate-400">Attends que l'hôte lance le prochain tournoi, puis scanne ton nouveau QR code.</p>
+          </div>`;
+        startPolling(5000);
+        return;
+      }
+
+      // Un nouveau tournoi a démarré : les identifiants ont changé, ce lien
+      // ne correspond plus à aucun joueur.
+      if (view.kind === 'not-found') {
+        stopPolling();
+        app.innerHTML = `<div class="bg-card border border-line rounded-xl p-8 text-center">
+            <p class="text-lg font-semibold mb-2">Ce lien n'est plus valide</p>
+            <p class="text-sm text-slate-400">Il appartient à un tournoi précédent. Demande à l'hôte ton QR code du tournoi en cours.</p>
+          </div>`;
         return;
       }
 
@@ -141,8 +164,11 @@ if (view.kind === 'not-found') {
       }
 
       if (view.kind === 'battle-in-progress') {
-        stopPolling();
         app.innerHTML = `<div class="bg-surface border border-line rounded-lg p-4 text-center text-sm text-slate-400">Combat en cours — regarde l'écran principal !</div>`;
+        // On continue d'interroger : après une égalité, le joueur doit ajouter
+        // une carte, et à la fin du combat il doit voir la suite. Sans ça, la
+        // page restait figée ici jusqu'à un rechargement manuel.
+        startPolling(3000);
         return;
       }
 
