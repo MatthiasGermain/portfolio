@@ -1,0 +1,7 @@
+---
+export const prerender = false;
+
+// Point d'entrée du jeu : l'écran host. Le middleware renvoie d'abord vers la
+// page du code si l'accès n'est pas encore validé.
+return Astro.redirect('/thomas-tcg/host');
+---

@@ -12,6 +12,14 @@ export default defineConfig({
   // sont rendues côté serveur grâce à l'adaptateur Vercel ci-dessous.
   output: 'static',
   adapter: vercel(),
+  security: {
+    // Derrière le proxy Vercel, la fonction ne reçoit pas le vrai domaine :
+    // sans cette liste, Astro ignore `X-Forwarded-Host` et croit servir
+    // `localhost`. Sa protection CSRF compare alors l'Origin du navigateur à
+    // `localhost` et rejette tous les formulaires POST ("Cross-site POST form
+    // submissions are forbidden"). Ajouter ici tout domaine réellement utilisé.
+    allowedDomains: [{ hostname: 'matthias-germain.vercel.app', protocol: 'https' }],
+  },
   vite: {
     plugins: [tailwindcss()],
   },
